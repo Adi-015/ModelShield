@@ -1,0 +1,89 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Datasets
+data/
+*.tar.gz
+*.zip
+cifar-10-batches-py/
+cifar-10-python.tar.gz
+
+# Model checkpoints & weights (preserve folder with .gitkeep)
+checkpoints/*
+!checkpoints/.gitkeep
+*.pth
+*.pt
+*.ckpt
+*.h5
+*.onnx
+
+# Generated outputs & figures (preserve folder with .gitkeep)
+outputs/*
+!outputs/.gitkeep
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.csv
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+# Testing caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Environment variables & secrets
+.env*
+secrets/
+*.pem
+*.key
+
+# Temporary files & logs
+tmp/
+temp/
+*.log
