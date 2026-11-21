@@ -34,14 +34,15 @@ ENV/
 env.bak/
 venv.bak/
 
-# Datasets
-data/
+# Datasets (never commit raw CIFAR-10 data)
+data/*
+!data/.gitkeep
 *.tar.gz
 *.zip
 cifar-10-batches-py/
 cifar-10-python.tar.gz
 
-# Model checkpoints & weights (preserve folder with .gitkeep)
+# Model checkpoints & large weights (permanent weights stay in Google Drive)
 checkpoints/*
 !checkpoints/.gitkeep
 *.pth
@@ -58,12 +59,25 @@ outputs/*
 *.jpeg
 *.svg
 *.csv
+*.json
+!outputs/.gitkeep
+
+# Execution Logs (preserve folder with .gitkeep)
+logs/*
+!logs/.gitkeep
+*.log
+
+# Personal Google Drive paths & Colab runtime artifacts
+/content/drive/
+MyDrive/
+drive/
+.colab/
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
 */.ipynb_checkpoints/*
 
-# Testing caches
+# Testing caches & coverage
 .pytest_cache/
 .coverage
 htmlcov/
@@ -83,7 +97,6 @@ secrets/
 *.pem
 *.key
 
-# Temporary files & logs
+# Temporary files
 tmp/
 temp/
-*.log
