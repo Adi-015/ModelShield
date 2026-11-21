@@ -1,0 +1,46 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Checkpoints (preserved permanently in Google Drive or local checkpoints/)
+checkpoints/*
+!checkpoints/.gitkeep
+*.pth
+*.pt
+*.ckpt
+
+# Datasets
+data/*
+!data/.gitkeep
+*.tar.gz
+*.zip
+cifar-10-batches-py/
+
+# Results & outputs
+results/classifier/*
+!results/classifier/.gitkeep
+results/detector/*
+!results/detector/.gitkeep
+results/attacks/*
+!results/attacks/.gitkeep
+results/firewall/*
+!results/firewall/.gitkeep
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.json
+!results/**/.gitkeep
+
+# Logs
+logs/*
+!logs/.gitkeep
+*.log
+
+# Environments & Caches
+.venv/
+env/
+.pytest_cache/
+.coverage
+.ipynb_checkpoints/
