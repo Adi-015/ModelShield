@@ -5,31 +5,33 @@
 [![CIFAR-10](https://img.shields.io/badge/Dataset-CIFAR--10-green.svg)](https://www.cs.toronto.edu/~kriz/cifar.html)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-An intelligent deep learning cybersecurity firewall designed to detect and intercept adversarial image attacks before they reach mission-critical computer vision models. Developed for the academic subject **Intelligent Model Design (IMD)**.
+An intelligent deep learning cybersecurity firewall designed to detect, quarantine, and intercept adversarial image attacks before they reach mission-critical computer vision models. Developed for the academic subject **Intelligent Model Design (IMD)**.
+
+**Official Repository:** [https://github.com/Adi-015/ModelShield.git](https://github.com/Adi-015/ModelShield.git)
 
 ---
 
 ## Table of Contents
 1. [Project Overview](#1-project-overview)
 2. [Problem Statement](#2-problem-statement)
-3. [Project Objectives](#3-project-objectives)
-4. [How Adversarial Attacks Work](#4-how-adversarial-attacks-work)
-5. [The Fast Gradient Sign Method (FGSM)](#5-the-fast-gradient-sign-method-fgsm)
-6. [System Architecture Diagram](#6-system-architecture-diagram)
-7. [Technology Stack](#7-technology-stack)
-8. [Project Folder Structure](#8-project-folder-structure)
-9. [Local Installation & Setup](#9-local-installation--setup)
-10. [Google Colab Training Instructions](#10-google-colab-training-instructions)
-11. [Executing the Firewall Locally](#11-executing-the-firewall-locally)
-12. [Evaluation Metrics & Benchmarks](#12-evaluation-metrics--benchmarks)
-13. [Current Limitations (Phase 1)](#13-current-limitations-phase-1)
+3. [System Architecture](#3-system-architecture)
+4. [Historical Baseline & Reproducibility](#4-historical-baseline--reproducibility)
+5. [Permanent Google Drive Checkpoint Storage](#5-permanent-google-drive-checkpoint-storage)
+6. [Resumable Training Pipeline](#6-resumable-training-pipeline)
+7. [Controlled CNN Classifier Optimization](#7-controlled-cnn-classifier-optimization)
+8. [Adversarial Detector Architecture & Training](#8-adversarial-detector-architecture--training)
+9. [Integrated Firewall Pipeline & Security Logic](#9-integrated-firewall-pipeline--security-logic)
+10. [Local Installation & Quickstart](#10-local-installation--quickstart)
+11. [Google Colab Training Guide](#11-google-colab-training-guide)
+12. [Evaluation Metrics & Defense Benchmarks](#12-evaluation-metrics--defense-benchmarks)
+13. [Limitations (Phase 1)](#13-limitations-phase-1)
 14. [Future Development Roadmap](#14-future-development-roadmap)
 
 ---
 
 ## 1. Project Overview
 
-Modern deep learning classification systems are highly effective yet notoriously fragile against adversarial manipulations. **ModelShield** introduces an architectural security layer — an **AI Firewall** — positioned in front of downstream vision models. 
+Modern deep learning classification systems are highly accurate yet notoriously fragile against adversarial manipulations. **ModelShield** introduces an architectural security layer — an **AI Firewall** — positioned in front of downstream vision models. 
 
 Rather than deploying complex or computationally heavy transformations during runtime, ModelShield deploys a dedicated, lightweight convolutional neural network (CNN) trained as a binary adversarial detector. The detector examines input samples for perturbation signatures, assigns an adversarial confidence probability, and enforces configurable security policies (`ALLOWED` vs. `BLOCKED`).
 
@@ -43,142 +45,202 @@ These adversarial modifications shift the input across decision boundaries, caus
 
 ---
 
-## 3. Project Objectives
-
-Phase 1 establishes a foundational, verified, and reproducible adversarial defense framework:
-- **Module 1 (Classifier):** Train a custom multi-layer CNN recognizing all 10 CIFAR-10 classes.
-- **Module 2 (Attack Generator):** Implement the Fast Gradient Sign Method (FGSM) in consistent physical pixel space and evaluate untargeted Attack Success Rates (ASR).
-- **Module 3 (Firewall Detector):** Generate balanced clean-vs-adversarial datasets without data leakage and train a dedicated binary CNN detector.
-- **Module 4 (Firewall Pipeline):** Build an integrated, threshold-gated firewall pipeline providing structured executive security reporting.
-
----
-
-## 4. How Adversarial Attacks Work
-
-Deep neural networks rely on dot products $\mathbf{w}^\top \mathbf{x}$ across millions of parameters. Even if an adversary perturbs each input pixel by an infinitesimal value $\epsilon$ below human perceptual limits, the cumulative inner-product perturbation across $d$ dimensions can grow as large as $\epsilon d \|\mathbf{w}\|_1$. 
-
-In high-dimensional datasets such as CIFAR-10 ($3 \times 32 \times 32 = 3,072$ dimensions), tiny coordinated changes across dimensions can drastically shift the final activations, tricking the classifier into predicting an unrelated class while the image appears unchanged to human observers.
-
----
-
-## 5. The Fast Gradient Sign Method (FGSM)
-
-Introduced by Goodfellow et al. (2014), FGSM is a single-step white-box adversarial attack that leverages the gradient of the model's loss function with respect to the input image.
-
-### Mathematical Formulation
-$$\mathbf{x}_{\text{adv}} = \text{clip}\left(\mathbf{x} + \epsilon \cdot \text{sign}\left(\nabla_{\mathbf{x}} \mathcal{L}(f(\mathbf{x}), y)\right), 0.0, 1.0\right)$$
-
-Where:
-- $\mathbf{x}$: Original clean image tensor in unnormalized physical pixel range $[0.0, 1.0]$.
-- $y$: Ground-truth class label.
-- $f(\mathbf{x})$: Classifier output logits.
-- $\mathcal{L}$: Cross-Entropy loss function.
-- $\nabla_{\mathbf{x}} \mathcal{L}$: Loss gradient with respect to input pixels.
-- $\epsilon$: Perturbation magnitude bound (e.g., $0.01, 0.03, 0.05, 0.10$).
-- $\text{clip}(\cdot, 0, 1)$: Pixel bounds clamping to prevent underflow or overflow.
-
-### Rigorous Normalization Handling
-Because PyTorch classifiers process z-score normalized inputs $\mathbf{x}_{\text{norm}} = \frac{\mathbf{x} - \mu}{\sigma}$, ModelShield executes perturbations strictly in physical $[0, 1]$ pixel space via differentiable denormalization and re-normalization. This ensures that channel standard deviations ($\sigma_r, \sigma_g, \sigma_b$) and valid pixel bounds $[0, 1]$ are mathematically preserved without clipping distortion.
-
----
-
-## 6. System Architecture Diagram
+## 3. System Architecture
 
 ```
-                              [ Incoming Image ]
-                                      │
-                                      ▼
-                       [ Preprocessing & Normalization ]
-                                      │
-                                      ▼
-                        ┌───────────────────────────┐
-                        │ Module 3: AI Detector CNN │
-                        │  (Binary Classification)  │
-                        └─────────────┬─────────────┘
-                                      │
-                                      ▼
-                       Adversarial Probability: P(adv)
-                                      │
-                          Is P(adv) >= Threshold?
-                                     / \
-                                    /   \
-                             YES   /     \   NO
-                                  /       \
-                                 ▼         ▼
-                      ┌───────────────┐   ┌───────────────────────────┐
-                      │    BLOCKED    │   │          ALLOWED          │
-                      │  Quarantine   │   │ Forward to Classifier CNN │
-                      │ Security Alert│   └─────────────┬─────────────┘
-                      └───────────────┘                 │
-                                                        ▼
-                                                [ Class Prediction ]
-                                                [ Confidence Score ]
+                               [ Incoming Image ]
+                                       │
+                                       ▼
+                        [ Preprocessing & Normalization ]
+                                       │
+                                       ▼
+                        ┌───────────────────────────────┐
+                        │   Module 3: AI Detector CNN   │
+                        │    (Binary Classification)    │
+                        └──────────────┬────────────────┘
+                                       │
+                                       ▼
+                        Adversarial Probability: P(adv)
+                                       │
+                           Is P(adv) >= Threshold?
+                                      / \
+                                     /   \
+                             YES    /     \    NO
+                                   /       \
+                                  ▼         ▼
+                       ┌───────────────┐   ┌───────────────────────────┐
+                       │    BLOCKED    │   │          ALLOWED          │
+                       │  Quarantine   │   │ Forward to Classifier CNN │
+                       │ Security Alert│   └─────────────┬─────────────┘
+                       └───────────────┘                 │
+                                                         ▼
+                                                 [ Class Prediction ]
+                                                 [ Confidence Score ]
 ```
+
+### Module Breakdown
+- **Module 1 (Core Classifier):** Custom 3-block CNN classifying images into the 10 CIFAR-10 classes.
+- **Module 2 (Attack Engine):** Fast Gradient Sign Method (FGSM) adversarial attack generation across perturbation magnitudes ($\epsilon \in [0.00, 0.01, 0.03, 0.05, 0.10]$) in unnormalized physical $[0, 1]$ pixel space.
+- **Module 3 (AI Firewall Detector):** Binary CNN screening incoming inputs for adversarial artifacts.
+- **Module 4 (Integrated Security Layer):** Pre-inference gateway that routes verified clean inputs to the classifier while dropping malicious inputs.
 
 ---
 
-## 7. Technology Stack
+## 4. Historical Baseline & Reproducibility
 
-- **Language:** Python 3.10+ (tested on Python 3.12)
-- **Deep Learning Framework:** PyTorch & Torchvision
-- **Numerical Computation:** NumPy
-- **Data & Metrics:** Scikit-learn (Classification Report, Confusion Matrix, PRF)
-- **Visualizations:** Matplotlib
-- **Image Processing:** Pillow (PIL)
-- **Progress Tracking:** tqdm
-- **Automated Testing:** pytest
+The original ModelShield experiment was trained in Google Colab with temporary session storage. Those weights were lost when the session ended. The metrics below are recovered from historical notebook outputs and serve as our experimental benchmark.
+
+### Previously Recorded Baseline Results
+
+#### Classifier (15 Epochs)
+- **Architecture:** Custom CIFAR10Classifier (3-Block CNN)
+- **Final Train Accuracy:** 70.95%
+- **Final Validation Accuracy:** 78.38%
+- **Final Train Loss:** 0.8344
+- **Final Validation Loss:** 0.6079
+- **Best Checkpoint:** Epoch 15
+
+#### Adversarial Detector (10 Epochs)
+- **Architecture:** Custom AdversarialDetector (3-Block CNN)
+- **Final Train Accuracy:** 99.52%
+- **Best Validation Accuracy:** 99.92%
+- **Final Validation Accuracy:** 99.46%
+- **Final Train Loss:** 0.0158
+- **Final Validation Loss:** 0.0173
+- **Best Checkpoint:** Epoch 5
+
+#### FGSM Attack Robustness (Historical Baseline)
+| Epsilon ($\epsilon$) | Clean Accuracy | Adversarial Accuracy | Attack Success Rate (ASR) |
+| :---: | :---: | :---: | :---: |
+| **0.00** | 79.12% | 79.12% | 0.00% |
+| **0.01** | 79.12% | 22.26% | 71.87% |
+| **0.03** | 79.12% | 6.36% | 92.01% |
+
+> **Important:** To regenerate real model weights, we rerun the reproducible training scripts. The original CNN experiment remains our fixed baseline for all comparative analysis.
 
 ---
 
-## 8. Project Folder Structure
+## 5. Permanent Google Drive Checkpoint Storage
 
+Checkpoints are permanently preserved on Google Drive to prevent data loss when Colab runtimes disconnect.
+
+### Google Drive Storage Layout
 ```
-ModelShield/
-├── src/
-│   ├── data.py          # CIFAR-10 data loaders, preprocessing, split handling
-│   ├── models.py        # Custom Classifier CNN and Detector CNN architectures
-│   ├── attacks.py       # FGSM attack engine, ASR calculation, visualization
-│   ├── train.py         # Training loops, validation, checkpoints, metrics
-│   └── firewall.py      # Integrated firewall pipeline and security reporting
-├── notebooks/
-│   └── ModelShield_Phase1.ipynb   # Complete, runnable Google Colab training notebook
-├── outputs/
-│   └── .gitkeep         # Evaluation plots, confusion matrices, demo artifacts
+/content/drive/MyDrive/ModelShield/
 ├── checkpoints/
-│   └── .gitkeep         # Saved best model weights (.pth)
-├── tests/
-│   └── test_models.py   # Automated pytest unit tests (runnable on CPU)
-├── config.py            # Centralized hyperparameters, paths, and random seeds
-├── main.py              # CLI entry point for local pipeline testing
-├── requirements.txt     # Locked production dependencies
-├── .gitignore           # Git exclusions for datasets, weights, caches
-└── README.md            # Comprehensive project documentation
+│   ├── baseline_classifier_best.pth
+│   ├── baseline_detector_best.pth
+│   ├── optimized_classifier_best.pth
+│   ├── optimized_detector_best.pth
+│   ├── latest_classifier.pth
+│   └── latest_detector.pth
+├── outputs/
+│   ├── classifier_history.json
+│   ├── detector_history.json
+│   ├── optimization_results.json
+│   ├── evaluation_results.json
+│   ├── robustness_results.json
+│   ├── confusion_matrix.png
+│   ├── training_curves.png
+│   ├── detector_roc_curve.png
+│   └── robustness_results.png
+└── logs/
+    └── training.log
 ```
+
+### Storage Safeguards
+- Non-zero file size check (`st_size > 0`) is performed after every save.
+- Explicit warnings are raised if Google Drive is expected but unmounted.
+- Baseline and optimized checkpoints are strictly separated and will never overwrite each other.
 
 ---
 
-## 9. Local Installation & Setup
+## 6. Resumable Training Pipeline
+
+If a Google Colab session times out or disconnects mid-training, training resumes from the last completed epoch rather than restarting from epoch 1.
+
+### Checkpoint State Preservation
+Each checkpoint stores:
+- `model_state_dict`: Neural network weights.
+- `optimizer_state_dict`: Adam momentum and variance states.
+- `scheduler_state_dict`: Learning rate schedule progress.
+- `epoch`: Current epoch index.
+- `val_acc` & `best_val_acc`: Validation accuracy tracking.
+- `history`: Full loss and accuracy histories across completed epochs.
+- `rng_state`: PyTorch, NumPy, Python, and CUDA RNG states for deterministic resumption.
+
+### Resumption Behavior
+1. `latest_<name>.pth` is saved after every completed epoch.
+2. `best_<name>.pth` is saved only when validation accuracy improves.
+3. If an experiment was already completed for the target number of epochs, training logs a completion notice and loads the best weights immediately, avoiding redundant computation.
+
+---
+
+## 7. Controlled CNN Classifier Optimization
+
+### Preservation of Architecture
+The custom CNN classifier architecture is strictly retained. It is **not** replaced with ResNet, VGG, Vision Transformers, or pretrained backbones.
+
+### Investigation of Baseline Accuracy Gap
+In the baseline, training accuracy (70.95%) was lower than validation accuracy (78.38%).
+- **Cause:** `CIFAR10Classifier` uses `Dropout2d(0.25)` across all convolutional blocks and `Dropout(0.50)` in the dense head. During training, stochastic deactivation drops 25%–50% of feature maps. During validation (`eval()`), dropout is disabled, activating full model capacity. Training also incorporates random cropping and horizontal flips.
+
+### Controlled Optimization Experiments
+| Experiment | Configuration | Goal | Checkpoint |
+| :--- | :--- | :--- | :--- |
+| **Baseline** | Original CNN (Adam lr=0.001, wd=1e-4, 15 epochs, standard aug) | Reproduce benchmark | `baseline_classifier_best.pth` |
+| **Exp A** | Enhanced data augmentation (RandomCrop, Flip, mild ColorJitter, Rotation) | Better generalization | `exp_a_augmentation_best.pth` |
+| **Exp B** | Learning Rate Scheduler (`CosineAnnealingLR`) | Fine-grained convergence | `exp_b_scheduler_best.pth` |
+| **Exp C** | Regularization tuning (Label Smoothing 0.05 + tuned weight decay 3e-4) | Prevent overconfidence | `exp_c_regularization_best.pth` |
+| **Exp D** | Combined Best Synergistic Configuration | **Target: 85%+ validation accuracy** | `optimized_classifier_best.pth` |
+
+---
+
+## 8. Adversarial Detector Architecture & Training
+
+### Architecture
+- **Conv Block 1:** Conv(3 $\to$ 32, $3 \times 3$, pad 1) $\to$ BatchNorm $\to$ ReLU $\to$ MaxPool $\to$ Dropout(0.2)
+- **Conv Block 2:** Conv(32 $\to$ 64, $3 \times 3$, pad 1) $\to$ BatchNorm $\to$ ReLU $\to$ MaxPool $\to$ Dropout(0.2)
+- **Conv Block 3:** Conv(64 $\to$ 128, $3 \times 3$, pad 1) $\to$ BatchNorm $\to$ ReLU $\to$ MaxPool $\to$ Dropout(0.3)
+- **Dense Head:** Linear(2048 $\to$ 128) $\to$ ReLU $\to$ Dropout(0.4) $\to$ Linear(128 $\to$ 1)
+
+### Compatibility & Gradient Sourcing
+Because FGSM perturbations depend directly on the classifier's gradients, the detector is trained on adversarial samples generated from the specific target classifier:
+- Baseline detector checkpoint: `baseline_detector_best.pth`
+- Optimized detector checkpoint: `optimized_detector_best.pth`
+- Train, validation, and test splits remain completely isolated to prevent data leakage.
+
+---
+
+## 9. Integrated Firewall Pipeline & Security Logic
+
+The firewall acts as a real-time gateway:
+1. **Input Preprocessing:** Normalizes raw input to CIFAR-10 distribution.
+2. **Adversarial Screening:** Passes image to `AdversarialDetector` to obtain probability $P(\text{adv})$.
+3. **Threshold Gate:**
+   - If $P(\text{adv}) \ge \text{threshold}$ (default: 0.50): **`BLOCKED`** (quarantine, log alert, bypass classifier).
+   - If $P(\text{adv}) < \text{threshold}$: **`ALLOWED`** (forward to classifier, return class and confidence).
+
+---
+
+## 10. Local Installation & Quickstart
 
 ### Prerequisites
-- Python 3.10 or higher
+- Python 3.10+
 - Git
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/<your-username>/ModelShield.git
-%cd ModelShield
+git clone https://github.com/Adi-015/ModelShield.git
+cd ModelShield
 ```
 
-### 2. Create and Activate Virtual Environment
-**On Windows (PowerShell):**
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-
-**On Linux / macOS:**
+### 2. Setup Virtual Environment
 ```bash
-python3 -m venv .venv
+python -m venv .venv
+# On Windows:
+.\.venv\Scripts\Activate.ps1
+# On Linux/macOS:
 source .venv/bin/activate
 ```
 
@@ -187,131 +249,59 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4. Run Automated Unit Tests
-Verify model shapes, preprocessing round-trips, FGSM clipping, and firewall decision logic:
+### 4. Run Automated Tests
 ```bash
-pytest -v
+pytest -v tests/test_models.py
 ```
 
----
-
-## 10. Google Colab Training Instructions
-
-Computationally heavy training for CIFAR-10 should be performed on a free GPU in Google Colab:
-
-1. Open [Google Colab](https://colab.research.google.com/).
-2. Select **Upload** and upload `notebooks/ModelShield_Phase1.ipynb` (or open directly from GitHub).
-3. Connect to a GPU runtime:
-   - Click **Runtime** -> **Change runtime type**.
-   - Select **T4 GPU** under Hardware accelerator -> Click **Save**.
-4. Run the first cell to clone your repository:
-   ```bash
-   !git clone https://github.com/<your-username>/ModelShield.git
-   %cd ModelShield
-   ```
-5. Run all cells sequentially. The notebook will:
-   - Download CIFAR-10 automatically.
-   - Train the 10-class CNN classifier.
-   - Evaluate classifier accuracy and generate confusion matrices on the untouched test set.
-   - Generate FGSM adversarial examples across multiple epsilons ($0.01, 0.03, 0.05, 0.10$).
-   - Compute the Attack Success Rate (ASR) curve.
-   - Construct balanced detector datasets (50% clean, 50% FGSM).
-   - Train the binary adversarial detector CNN.
-   - Evaluate detector metrics (Accuracy, Precision, Recall, F1, False Positive Rate).
-   - Test the complete integrated firewall pipeline.
-   - Save the best weights to `checkpoints/` and optionally mirror them to your Google Drive.
-6. Download the generated `.pth` checkpoints and place them in your local `checkpoints/` folder.
-
----
-
-## 11. Executing the Firewall Locally
-
-Run the integrated firewall CLI demonstration:
-
+### 5. Run Local Pipeline Demo
 ```bash
 python main.py
 ```
 
-### Command-Line Arguments
-```bash
-# Run demonstration with custom detection threshold
-python main.py --threshold 0.60
+---
 
-# Run demonstration with custom FGSM perturbation
-python main.py --epsilon 0.05
+## 11. Google Colab Training Guide
 
-# Inspect a specific local image file
-python main.py --image path/to/image.png --threshold 0.50
-```
-
-### Example Firewall Output Reports
-
-**For a Suspicious Adversarial Image:**
-```text
-==================================================
-           MODELSHIELD SECURITY REPORT            
-==================================================
-Input: adversarial_sample.png
-Adversarial probability: 0.9241
-Threshold: 0.50
-Firewall decision: BLOCKED
-Reason: The detector classified the image as suspicious.
-==================================================
-```
-
-**For a Clean Image:**
-```text
-==================================================
-           MODELSHIELD SECURITY REPORT            
-==================================================
-Input: clean_sample.png
-Adversarial probability: 0.0382
-Threshold: 0.50
-Firewall decision: ALLOWED
-Predicted class: dog
-Classification confidence: 94.20%
-==================================================
-```
+1. Open [Google Colab](https://colab.research.google.com/).
+2. Select **Upload** and upload `notebooks/ModelShield_Phase1.ipynb`.
+3. Set runtime to **GPU (T4)** via `Runtime` $\to$ `Change runtime type`.
+4. Run the Google Drive mount cell to link `/content/drive/MyDrive/ModelShield`.
+5. Execute notebook cells sequentially:
+   - Cell 1–2: Drive setup & persistence directory creation.
+   - Cell 3–4: CUDA diagnostics & seed initialization.
+   - Cell 5–6: Repository setup and CIFAR-10 loading.
+   - Cell 7–8: Baseline classifier training (15 epochs, resumable) & test evaluation.
+   - Cell 9–10: Controlled optimization experiments (Exp D, target 85%+ val accuracy).
+   - Cell 11–12: FGSM adversarial attack visualization & ASR curve.
+   - Cell 13–14: Adversarial detector training (10 epochs, resumable) & ROC-AUC evaluation.
+   - Cell 15–16: Integrated ModelShield firewall benchmark & live demo.
+   - Cell 17: Storage manifest verification.
 
 ---
 
-## 12. Evaluation Metrics & Benchmarks
+## 12. Evaluation Metrics & Defense Benchmarks
 
-The project records and reports standard scientific metrics:
-
-1. **Classifier Metrics (Untouched Test Set):**
-   - Overall Classification Accuracy.
-   - Per-Class Precision, Recall, and F1-Score.
-   - Multi-class Confusion Matrix.
-
-2. **Attack Benchmarks (FGSM):**
-   - Untargeted Attack Success Rate (ASR):
-     $$\text{ASR} = \frac{\text{Samples Fooled by Attack}}{\text{Samples Originally Classified Correctly}}$$
-   - Adversarial Accuracy across $\epsilon \in [0.0, 0.01, 0.03, 0.05, 0.10]$.
-
-3. **Detector Firewall Metrics:**
-   - Classification Accuracy on held-out clean/adversarial pairs.
-   - Precision: $\frac{\text{TP}}{\text{TP} + \text{FP}}$ (proportion of flagged images that were truly adversarial).
-   - Recall / True Positive Rate: $\frac{\text{TP}}{\text{TP} + \text{FN}}$ (proportion of attacks successfully detected).
-   - F1-Score: Harmonic mean of precision and recall.
-   - False Positive Rate (FPR): $\frac{\text{FP}}{\text{FP} + \text{TN}}$ (clean images mistakenly blocked).
-   - Binary Confusion Matrix.
+The project reports standard scientific metrics:
+- **Classifier:** Clean Accuracy, Loss, Per-Class Accuracy, Confusion Matrix.
+- **Attack Robustness:** Clean Accuracy, Adversarial Accuracy, Attack Success Rate (ASR), Degradation across $\epsilon \in [0.00, 0.01, 0.03, 0.05, 0.10]$.
+- **Detector:** Accuracy, Precision, Recall, F1-Score, False Positive Rate (FPR), False Negative Rate (FNR), ROC-AUC Score, ROC Curve.
+- **Firewall Defense:** Attack Threat Mitigation Rate (% attacks blocked), Clean Utility Retained (% clean images correctly classified), False Alarm Rate (% clean images blocked).
 
 ---
 
-## 13. Current Limitations (Phase 1)
+## 13. Limitations (Phase 1)
 
-1. **Single Attack Distribution:** The Phase 1 detector is trained specifically on FGSM perturbations and is not guaranteed to generalize to other attack distributions.
-2. **Untargeted Attacks Only:** Phase 1 focuses exclusively on untargeted FGSM attacks.
-3. **Resolution:** Bounded to the CIFAR-10 resolution ($32 \times 32$ pixels).
-4. **No Adversarial Purification:** Flagged images are quarantined/blocked; Phase 1 does not attempt image restoration or denoising.
-5. **No Adversarial Retraining:** The classifier weights remain fixed rather than robustly re-trained.
+1. **Single Attack Distribution:** Trained primarily on FGSM perturbations; does not guarantee defense against multi-step attacks (PGD, C&W).
+2. **Resolution:** CIFAR-10 resolution ($32 \times 32$ pixels).
+3. **No Retraining:** Classifier weights remain frozen rather than adversarially robustified.
+4. **No Purification:** Blocked images are quarantined rather than denoised.
 
 ---
 
 ## 14. Future Development Roadmap
 
 - [ ] **Phase 2 — Multi-Attack Generation:** Projected Gradient Descent (PGD), Carlini-Wagner (C&W), and DeepFool.
-- [ ] **Phase 3 — Robust Detection:** Ensemble detectors and statistical feature attribution (e.g., Grad-CAM, Mahalanobis distance).
-- [ ] **Phase 4 — Adversarial Purification & Defense:** Wavelet denoising, autoencoder purification, and adversarial training.
-- [ ] **Phase 5 — Interactive UI:** Streamlit / FastAPI interactive dashboard for live firewall inspection.
+- [ ] **Phase 3 — Defense Robustness:** Adversarial training and statistical feature attribution (Grad-CAM, Mahalanobis distance).
+- [ ] **Phase 4 — Adversarial Purification:** Denoising autoencoders and wavelet transformations.
+- [ ] **Phase 5 — Web Dashboard:** Streamlit/FastAPI interactive monitoring dashboard.
