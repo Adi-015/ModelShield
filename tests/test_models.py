@@ -1,11 +1,13 @@
 """
 ModelShield - Test Suite
-Automated unit tests covering models, preprocessing, FGSM attacks, and firewall logic.
+Automated unit tests covering models, preprocessing, FGSM attacks, firewall logic,
+checkpoint saving/loading verification, and weight initialization.
 All tests run on CPU without requiring pre-trained weights or full dataset downloads.
 """
 
 from pathlib import Path
 import sys
+import tempfile
 
 # Ensure repository root is on sys.path for direct pytest invocation
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -22,7 +24,8 @@ import config
 from src.attacks import fgsm_attack
 from src.data import denormalize_tensor, normalize_tensor
 from src.firewall import ModelShieldFirewall
-from src.models import AdversarialDetector, CIFAR10Classifier
+from src.models import AdversarialDetector, CIFAR10Classifier, initialize_weights
+from src.train import save_checkpoint, load_checkpoint
 
 
 @pytest.fixture
@@ -58,7 +61,6 @@ def test_classifier_output_shape(dummy_batch):
 
     assert logits.shape == (4, 10), f"Expected shape (4, 10), got {logits.shape}"
     assert torch.is_tensor(logits)
-    # Check that outputs are raw logits (unbounded real numbers, not probabilities)
     assert not torch.allclose(logits.sum(dim=1), torch.ones(4)), "Logits should not sum to 1.0"
 
 
@@ -97,7 +99,6 @@ def test_normalization_round_trip():
 
 def test_firewall_image_preprocessing():
     """Verify that preprocess_image converts PIL images to normalized shape (1, 3, 32, 32)."""
-    # Create arbitrary resolution PIL image
     pil_img = Image.new("RGB", (128, 128), color=(100, 150, 200))
     tensor = ModelShieldFirewall.preprocess_image(pil_img)
 
@@ -121,17 +122,13 @@ def test_fgsm_output_validity(dummy_batch, dummy_labels, cpu_device):
         epsilon=epsilon,
     )
 
-    # Output shape must match input
     assert adv_batch.shape == dummy_batch.shape
 
-    # Check bounds in raw physical pixel space [0, 1]
     raw_orig = denormalize_tensor(dummy_batch)
     raw_adv = denormalize_tensor(adv_batch)
 
-    # Valid pixel range
     assert (raw_adv >= 0.0).all() and (raw_adv <= 1.0).all(), "Adversarial pixels must be in [0, 1]"
 
-    # Perturbation magnitude must not exceed epsilon
     diff = torch.abs(raw_adv - raw_orig)
     assert diff.max().item() <= (epsilon + 1e-5), f"Perturbation {diff.max().item()} exceeded epsilon {epsilon}"
 
@@ -152,7 +149,6 @@ class MockDetector(nn.Module):
 
     def __init__(self, fixed_prob: float):
         super().__init__()
-        # Invert sigmoid: logit = ln(p / (1 - p))
         fixed_prob = max(1e-6, min(1.0 - 1e-6, fixed_prob))
         self.logit_val = float(np.log(fixed_prob / (1.0 - fixed_prob)))
 
@@ -219,16 +215,91 @@ def test_firewall_custom_threshold_override():
         detector=mock_detector,
         classifier_path=None,
         detector_path=None,
-        threshold=0.50,  # Default: 0.45 < 0.50 -> ALLOWED
+        threshold=0.50,
         device=torch.device("cpu"),
     )
 
     dummy_input = torch.randn(1, 3, 32, 32)
 
-    # Default threshold -> ALLOWED
     report_default = firewall.process(dummy_input)
     assert report_default["decision"] == "ALLOWED"
 
-    # Stricter threshold 0.40 -> BLOCKED
     report_strict = firewall.process(dummy_input, custom_threshold=0.40)
     assert report_strict["decision"] == "BLOCKED"
+
+
+def test_firewall_batch_processing(dummy_batch):
+    """Verify batch processing capability of ModelShieldFirewall."""
+    classifier = CIFAR10Classifier()
+    mock_detector = MockDetector(fixed_prob=0.75)
+
+    firewall = ModelShieldFirewall(
+        classifier=classifier,
+        detector=mock_detector,
+        classifier_path=None,
+        detector_path=None,
+        threshold=0.50,
+        device=torch.device("cpu"),
+    )
+
+    reports = firewall.process_batch(dummy_batch)
+    assert len(reports) == 4
+    for r in reports:
+        assert r["decision"] == "BLOCKED"
+        assert r["adversarial_probability"] >= 0.50
+
+
+# -------------------------------------------------------------------------
+# Test 6: Checkpoint Saving, Verification, and Loading Roundtrip
+# -------------------------------------------------------------------------
+
+def test_checkpoint_save_and_load_roundtrip():
+    """Verify that save_checkpoint verifies file size and load_checkpoint restores state accurately."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_dir = Path(tmpdir)
+        ckpt_path = tmp_dir / "latest.pth"
+        best_path = tmp_dir / "best.pth"
+
+        model = CIFAR10Classifier()
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+        state = {
+            "epoch": 5,
+            "experiment_id": "test_run",
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "val_acc": 0.825,
+            "val_loss": 0.512,
+            "best_val_acc": 0.825,
+        }
+
+        # Save with size check
+        save_checkpoint(state, ckpt_path, is_best=True, best_filepath=best_path)
+
+        assert ckpt_path.exists() and ckpt_path.stat().st_size > 0
+        assert best_path.exists() and best_path.stat().st_size > 0
+
+        # Load into fresh model
+        new_model = CIFAR10Classifier()
+        new_optimizer = torch.optim.Adam(new_model.parameters(), lr=0.001)
+
+        meta = load_checkpoint(best_path, new_model, new_optimizer, device=torch.device("cpu"))
+        assert meta["epoch"] == 5
+        assert meta["val_acc"] == 0.825
+
+        # Verify weights match
+        for p1, p2 in zip(model.parameters(), new_model.parameters()):
+            assert torch.allclose(p1, p2)
+
+
+# -------------------------------------------------------------------------
+# Test 7: Weight Initialization Helper
+# -------------------------------------------------------------------------
+
+def test_weight_initialization():
+    """Verify that initialize_weights does not throw and produces valid parameter distributions."""
+    model = CIFAR10Classifier()
+    model = initialize_weights(model, method="kaiming_normal")
+    assert isinstance(model, CIFAR10Classifier)
+    for p in model.parameters():
+        assert not torch.isnan(p).any()

@@ -5,7 +5,7 @@ to forward them to the target classifier or block them as suspicious.
 """
 
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from PIL import Image
 import torch
 import torch.nn as nn
@@ -76,7 +76,7 @@ class ModelShieldFirewall:
     @staticmethod
     def _load_weights(model: nn.Module, path: Path) -> None:
         """Safely load model weights from a state_dict or training checkpoint dictionary."""
-        checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
         if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
             model.load_state_dict(checkpoint["model_state_dict"])
         elif isinstance(checkpoint, dict):
@@ -163,23 +163,16 @@ class ModelShieldFirewall:
         custom_threshold: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
-        Execute the complete ModelShield Firewall pipeline:
+        Execute the complete ModelShield Firewall pipeline on a single image:
         1. Receive and preprocess image.
         2. Evaluate adversarial probability via detector.
         3. Compare against threshold.
         4. If clean (< threshold): ALLOW and pass to classifier.
         5. If suspicious (>= threshold): BLOCK and flag.
-
-        Args:
-            image_input: Normalized Tensor, PIL Image, or file path.
-            custom_threshold: Optional override for decision cutoff.
-
-        Returns:
-            Structured security inspection report dictionary.
         """
         threshold = custom_threshold if custom_threshold is not None else self.threshold
 
-        # Step 1: Preprocess
+        # Preprocess
         if isinstance(image_input, torch.Tensor):
             tensor = image_input
             if tensor.dim() == 3:
@@ -187,7 +180,7 @@ class ModelShieldFirewall:
         else:
             tensor = self.preprocess_image(image_input)
 
-        # Step 2: Adversarial Detection
+        # Adversarial Detection
         adv_prob = self.detect(tensor)
         is_suspicious = adv_prob >= threshold
 
@@ -197,7 +190,7 @@ class ModelShieldFirewall:
             "is_adversarial": is_suspicious,
         }
 
-        # Step 3: Firewall Decision Gate
+        # Firewall Decision Gate
         if is_suspicious:
             report.update({
                 "decision": "BLOCKED",
@@ -217,6 +210,62 @@ class ModelShieldFirewall:
             })
 
         return report
+
+    def process_batch(
+        self,
+        batch_tensors: torch.Tensor,
+        custom_threshold: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Vectorized evaluation of the firewall over a batch of tensors.
+        Args:
+            batch_tensors: Normalized tensor of shape (B, 3, 32, 32).
+        Returns:
+            List of inspection report dictionaries for each sample in the batch.
+        """
+        threshold = custom_threshold if custom_threshold is not None else self.threshold
+        batch_tensors = batch_tensors.to(self.device)
+        b_size = batch_tensors.size(0)
+
+        with torch.no_grad():
+            det_logits = self.detector(batch_tensors).squeeze(-1)
+            det_probs = torch.sigmoid(det_logits).cpu().tolist()
+
+            cls_logits = self.classifier(batch_tensors)
+            cls_probs = F.softmax(cls_logits, dim=1).cpu()
+            cls_preds = cls_probs.argmax(dim=1).tolist()
+            cls_confs = [cls_probs[i, cls_preds[i]].item() for i in range(b_size)]
+
+        reports = []
+        for i in range(b_size):
+            prob = det_probs[i]
+            is_suspicious = prob >= threshold
+            if is_suspicious:
+                reports.append({
+                    "sample_idx": i,
+                    "adversarial_probability": float(prob),
+                    "threshold": threshold,
+                    "is_adversarial": True,
+                    "decision": "BLOCKED",
+                    "reason": "The detector classified the image as suspicious.",
+                    "predicted_class_id": None,
+                    "predicted_class_name": None,
+                    "classification_confidence": None,
+                })
+            else:
+                pred_id = cls_preds[i]
+                reports.append({
+                    "sample_idx": i,
+                    "adversarial_probability": float(prob),
+                    "threshold": threshold,
+                    "is_adversarial": False,
+                    "decision": "ALLOWED",
+                    "reason": "Image passed adversarial verification.",
+                    "predicted_class_id": pred_id,
+                    "predicted_class_name": config.CIFAR10_CLASSES[pred_id],
+                    "classification_confidence": float(cls_confs[i]),
+                })
+        return reports
 
     def format_security_report(
         self,

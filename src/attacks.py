@@ -2,9 +2,11 @@
 ModelShield - Adversarial Attack Module
 Implements the Fast Gradient Sign Method (FGSM) adversarial attack,
 Attack Success Rate (ASR) computation, and attack visualization tools.
+Perturbations are computed strictly in unnormalized physical [0, 1] pixel space.
 """
 
-from typing import Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Any
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -26,11 +28,13 @@ def fgsm_attack(
     Generate adversarial examples using the Fast Gradient Sign Method (FGSM).
 
     Mathematical Formulation:
-        x_adv = clip(x_raw + epsilon * sign(grad_x(Loss(f(x_norm), y))), 0.0, 1.0)
-        x_norm_adv = normalize(x_adv)
+        x_raw = denormalize(images)
+        loss = Loss(model(normalize(x_raw)), labels)
+        grad_x = d(loss) / d(x_raw)
+        x_adv = clip(x_raw + epsilon * sign(grad_x), 0.0, 1.0)
+        images_adv = normalize(x_adv)
 
-    Perturbations are performed in the unnormalized [0, 1] physical image space
-    to ensure exact epsilon perturbation bounds and proper clipping.
+    Perturbations are bounded strictly in physical [0, 1] pixel space.
 
     Args:
         model: Target PyTorch classifier.
@@ -68,7 +72,7 @@ def fgsm_attack(
     data_grad = raw_images.grad.data
     sign_data_grad = data_grad.sign()
 
-    # Perturb in [0, 1] pixel space and clamp to valid range
+    # Perturb in [0, 1] pixel space and clamp to valid physical range
     perturbed_raw = raw_images + epsilon * sign_data_grad
     perturbed_raw = torch.clamp(perturbed_raw, 0.0, 1.0)
 
@@ -105,7 +109,7 @@ def evaluate_attack_success_rate(
         max_samples: Optional cap on evaluated samples for quick testing.
 
     Returns:
-        Dictionary containing clean_acc, adv_acc, asr, and sample counts.
+        Dictionary containing clean_acc, adv_acc, asr, degradation, and counts.
     """
     model.eval()
     total_evaluated = 0
@@ -132,7 +136,7 @@ def evaluate_attack_success_rate(
         correct_mask = (clean_preds == labels)
         batch_originally_correct = correct_mask.sum().item()
 
-        if batch_originally_correct > 0:
+        if batch_originally_correct > 0 and epsilon > 0.0:
             # Generate adversarial examples for correctly classified images
             correct_images = images[correct_mask]
             correct_labels = labels[correct_mask]
@@ -148,21 +152,24 @@ def evaluate_attack_success_rate(
                 adv_logits = model(adv_images)
                 adv_preds = adv_logits.argmax(dim=1)
 
-            # Attack succeeded if prediction is no longer the true label
+            # Attack succeeded if prediction changed away from true label
             batch_fooled = (adv_preds != correct_labels).sum().item()
             fooled_count += batch_fooled
 
-        # Also compute overall adversarial accuracy on the entire batch
-        adv_batch = fgsm_attack(
-            model=model,
-            images=images,
-            labels=labels,
-            epsilon=epsilon,
-        )
-        with torch.no_grad():
-            adv_batch_logits = model(adv_batch)
-            adv_batch_preds = adv_batch_logits.argmax(dim=1)
-            adv_correct += (adv_batch_preds == labels).sum().item()
+        # Also evaluate adversarial accuracy across the entire batch
+        if epsilon == 0.0:
+            adv_correct += batch_originally_correct
+        else:
+            adv_batch = fgsm_attack(
+                model=model,
+                images=images,
+                labels=labels,
+                epsilon=epsilon,
+            )
+            with torch.no_grad():
+                adv_batch_logits = model(adv_batch)
+                adv_batch_preds = adv_batch_logits.argmax(dim=1)
+                adv_correct += (adv_batch_preds == labels).sum().item()
 
         total_evaluated += batch_size
         originally_correct += batch_originally_correct
@@ -173,16 +180,72 @@ def evaluate_attack_success_rate(
     clean_acc = (originally_correct / total_evaluated) if total_evaluated > 0 else 0.0
     adv_acc = (adv_correct / total_evaluated) if total_evaluated > 0 else 0.0
     asr = (fooled_count / originally_correct) if originally_correct > 0 else 0.0
+    degradation = clean_acc - adv_acc
 
     return {
-        "epsilon": epsilon,
+        "epsilon": float(epsilon),
         "total_evaluated": total_evaluated,
         "originally_correct": originally_correct,
         "fooled_count": fooled_count,
-        "clean_accuracy": clean_acc,
-        "adversarial_accuracy": adv_acc,
-        "attack_success_rate": asr,
+        "clean_accuracy": float(clean_acc),
+        "adversarial_accuracy": float(adv_acc),
+        "attack_success_rate": float(asr),
+        "accuracy_degradation": float(degradation),
     }
+
+
+def evaluate_fgsm_spectrum(
+    model: nn.Module,
+    dataloader: torch.utils.data.DataLoader,
+    epsilons: List[float],
+    device: torch.device,
+    save_plot_path: Optional[Path] = None,
+) -> List[Dict[str, float]]:
+    """
+    Evaluate classifier robustness across multiple FGSM epsilon values.
+    Generates a comparison curve of Clean Acc vs Adversarial Acc vs ASR.
+    """
+    results: List[Dict[str, float]] = []
+    print(f"\n[FGSM Robustness Evaluation] Testing epsilons: {epsilons}")
+
+    for eps in epsilons:
+        res = evaluate_attack_success_rate(model, dataloader, eps, device)
+        results.append(res)
+        print(
+            f"  Epsilon: {eps:.2f} | Clean Acc: {res['clean_accuracy']*100:.2f}% | "
+            f"Adv Acc: {res['adversarial_accuracy']*100:.2f}% | "
+            f"ASR: {res['attack_success_rate']*100:.2f}% | "
+            f"Degradation: {res['accuracy_degradation']*100:.2f}%"
+        )
+
+    if save_plot_path:
+        save_plot_path = Path(save_plot_path)
+        save_plot_path.parent.mkdir(parents=True, exist_ok=True)
+
+        eps_vals = [r["epsilon"] for r in results]
+        adv_accs = [r["adversarial_accuracy"] * 100 for r in results]
+        asrs = [r["attack_success_rate"] * 100 for r in results]
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.plot(eps_vals, adv_accs, "r-o", linewidth=2, label="Adversarial Accuracy (%)")
+        ax.plot(eps_vals, asrs, "k--s", linewidth=2, label="Attack Success Rate (ASR %)")
+        ax.axhline(
+            y=results[0]["clean_accuracy"] * 100,
+            color="g",
+            linestyle=":",
+            label="Clean Accuracy (%)",
+        )
+        ax.set_xlabel("Perturbation Magnitude (Epsilon $\\epsilon$)", fontsize=11)
+        ax.set_ylabel("Percentage (%)", fontsize=11)
+        ax.set_title("FGSM Vulnerability Curve (CIFAR-10 Classifier)", fontsize=12)
+        ax.set_ylim(-2, 102)
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="best")
+        plt.tight_layout()
+        plt.savefig(str(save_plot_path), dpi=300, bbox_inches="tight")
+        plt.close(fig)
+
+    return results
 
 
 def visualize_adversarial_examples(
@@ -195,17 +258,6 @@ def visualize_adversarial_examples(
 ) -> plt.Figure:
     """
     Display clean vs adversarial images side-by-side with predicted probabilities.
-
-    Args:
-        model: Target classifier.
-        sample_image: Single normalized tensor of shape (3, 32, 32) or (1, 3, 32, 32).
-        sample_label: Integer ground truth label.
-        epsilons: List of epsilon values to evaluate.
-        device: Torch device.
-        save_path: Optional path to save figure.
-
-    Returns:
-        Matplotlib figure object.
     """
     if sample_image.dim() == 3:
         sample_image = sample_image.unsqueeze(0)
@@ -228,7 +280,8 @@ def visualize_adversarial_examples(
     # Column 0: Clean Image
     axes[0, 0].imshow(clean_raw)
     axes[0, 0].set_title(
-        f"Original Clean\nTrue: {config.CIFAR10_CLASSES[sample_label]}\nPred: {config.CIFAR10_CLASSES[clean_pred]} ({clean_conf * 100:.1f}%)",
+        f"Original Clean\nTrue: {config.CIFAR10_CLASSES[sample_label]}\n"
+        f"Pred: {config.CIFAR10_CLASSES[clean_pred]} ({clean_conf * 100:.1f}%)",
         fontsize=10,
     )
     axes[0, 0].axis("off")
@@ -250,13 +303,13 @@ def visualize_adversarial_examples(
             adv_conf = adv_probs[adv_pred].item()
 
         adv_raw = denormalize_tensor(adv_tensor).squeeze(0).permute(1, 2, 0).cpu().numpy()
-
         is_fooled = adv_pred != sample_label
         title_color = "darkred" if is_fooled else "black"
 
         axes[0, col_idx].imshow(adv_raw)
         axes[0, col_idx].set_title(
-            f"FGSM (eps={eps})\nPred: {config.CIFAR10_CLASSES[adv_pred]} ({adv_conf * 100:.1f}%)\nStatus: {'FOOLED' if is_fooled else 'CORRECT'}",
+            f"FGSM (eps={eps})\nPred: {config.CIFAR10_CLASSES[adv_pred]} ({adv_conf * 100:.1f}%)\n"
+            f"Status: {'FOOLED' if is_fooled else 'CORRECT'}",
             fontsize=10,
             color=title_color,
         )
@@ -276,6 +329,8 @@ def visualize_adversarial_examples(
 
     plt.tight_layout()
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(str(save_path), dpi=300, bbox_inches="tight")
 
     return fig

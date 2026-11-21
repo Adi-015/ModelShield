@@ -1,17 +1,49 @@
 """
 ModelShield - Neural Network Architectures
 Defines the CIFAR-10 image classifier and the adversarial detector CNNs.
+Preserves the exact custom CNN architectures while providing initialization helpers.
 """
 
+from typing import Optional
 import torch
 import torch.nn as nn
+
+
+def initialize_weights(model: nn.Module, method: str = "kaiming_normal") -> nn.Module:
+    """
+    Apply structured weight initialization across Conv2d, Linear, and BatchNorm layers.
+    Used in controlled optimization experiments without altering architecture.
+
+    Args:
+        model: PyTorch neural network.
+        method: 'kaiming_normal' (default, He normal) or 'kaiming_uniform'.
+
+    Returns:
+        The initialized model.
+    """
+    for m in model.modules():
+        if isinstance(m, nn.Conv2d):
+            if method == "kaiming_normal":
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+            elif method == "kaiming_uniform":
+                nn.init.kaiming_uniform_(m.weight, mode="fan_in", nonlinearity="relu")
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, (nn.BatchNorm2d, nn.BatchNorm1d)):
+            nn.init.constant_(m.weight, 1.0)
+            nn.init.constant_(m.bias, 0.0)
+        elif isinstance(m, nn.Linear):
+            nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0.0)
+    return model
 
 
 class CIFAR10Classifier(nn.Module):
     """
     Custom Convolutional Neural Network for 10-class CIFAR-10 image classification.
 
-    Architecture:
+    Exact Architecture (Preserved Baseline):
     - Conv Block 1: Conv(3->32) -> BN -> ReLU -> Conv(32->32) -> BN -> ReLU -> MaxPool -> Dropout(0.25)
     - Conv Block 2: Conv(32->64) -> BN -> ReLU -> Conv(64->64) -> BN -> ReLU -> MaxPool -> Dropout(0.25)
     - Conv Block 3: Conv(64->128) -> BN -> ReLU -> MaxPool -> Dropout(0.25)
@@ -88,7 +120,7 @@ class AdversarialDetector(nn.Module):
     - Class 0: Clean image
     - Class 1: Adversarially perturbed image (FGSM)
 
-    Architecture:
+    Exact Architecture (Preserved Baseline):
     - Conv Block 1: Conv(3->32) -> BN -> ReLU -> MaxPool -> Dropout(0.2)
     - Conv Block 2: Conv(32->64) -> BN -> ReLU -> MaxPool -> Dropout(0.2)
     - Conv Block 3: Conv(64->128) -> BN -> ReLU -> MaxPool -> Dropout(0.3)

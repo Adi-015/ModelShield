@@ -1,13 +1,14 @@
 """
 ModelShield - Data Ingestion and Preprocessing Module
-Handles CIFAR-10 downloading, train/validation/test splitting,
-normalization/denormalization, DataLoaders, and adversarial dataset creation.
+Handles CIFAR-10 downloading, deterministic train/val/test splitting,
+standard and enhanced data augmentation, normalization/denormalization,
+and adversarial dataset generation.
 """
 
 from pathlib import Path
 from typing import Tuple, Optional
 import torch
-from torch.utils.data import Dataset, DataLoader, Subset, TensorDataset
+from torch.utils.data import Dataset, DataLoader, Subset
 import torchvision
 import torchvision.transforms as transforms
 
@@ -77,8 +78,8 @@ def normalize_tensor(tensor: torch.Tensor) -> torch.Tensor:
 class TransformedDataset(Dataset):
     """
     Applies a specified torchvision transform to a given Dataset or Subset.
-    Useful for applying different transforms (e.g. train augmentation vs val)
-    after splitting the base dataset.
+    Ensures train augmentation vs validation transforms remain strictly separated
+    after dataset splitting.
     """
 
     def __init__(self, base_dataset: Dataset, transform: Optional[transforms.Compose] = None):
@@ -95,18 +96,41 @@ class TransformedDataset(Dataset):
         return image, label
 
 
-def get_cifar10_transforms() -> Tuple[transforms.Compose, transforms.Compose]:
+def get_cifar10_transforms(
+    augmentation: str = "standard",
+) -> Tuple[transforms.Compose, transforms.Compose]:
     """
     Returns train and evaluation transforms for CIFAR-10.
-    Train: RandomCrop + RandomHorizontalFlip + ToTensor + Normalize.
-    Eval: ToTensor + Normalize.
+
+    Args:
+        augmentation:
+            - 'standard': Preserved baseline augmentation:
+                          RandomCrop(32, padding=4) + RandomHorizontalFlip() + ToTensor + Normalize.
+            - 'enhanced': Controlled optimization augmentation (Exp A & D):
+                          RandomCrop(32, padding=4) + RandomHorizontalFlip() +
+                          ColorJitter(0.1, 0.1, 0.1) + RandomRotation(10) + ToTensor + Normalize.
+
+    Returns:
+        (train_transform, eval_transform)
+        Notice: eval_transform strictly consists only of ToTensor + Normalize.
     """
-    train_transform = transforms.Compose([
-        transforms.RandomCrop(32, padding=4),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(config.CIFAR10_MEAN, config.CIFAR10_STD),
-    ])
+    if augmentation == "enhanced":
+        train_transform = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
+            transforms.RandomRotation(degrees=10),
+            transforms.ToTensor(),
+            transforms.Normalize(config.CIFAR10_MEAN, config.CIFAR10_STD),
+        ])
+    else:
+        # Standard baseline augmentation
+        train_transform = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(config.CIFAR10_MEAN, config.CIFAR10_STD),
+        ])
 
     eval_transform = transforms.Compose([
         transforms.ToTensor(),
@@ -117,10 +141,11 @@ def get_cifar10_transforms() -> Tuple[transforms.Compose, transforms.Compose]:
 
 
 def get_cifar10_dataloaders(
-    data_dir: Path = config.DATA_DIR,
+    data_dir: Optional[Path] = None,
     batch_size: int = config.CLASSIFIER_BATCH_SIZE,
     val_split_ratio: float = config.VAL_SPLIT_RATIO,
     random_seed: int = config.RANDOM_SEED,
+    augmentation: str = "standard",
     num_workers: int = 0,
     download: bool = True,
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
@@ -128,27 +153,29 @@ def get_cifar10_dataloaders(
     Downloads CIFAR-10, partitions the training split into train and validation sets,
     and returns DataLoaders for train, validation, and untouched test splits.
 
-    Guarantees no data leakage between splits.
+    Guarantees deterministic splitting and strict data isolation across baseline
+    and optimization experiments.
     """
-    train_transform, eval_transform = get_cifar10_transforms()
+    target_data_dir = data_dir or config.DATA_DIR
+    train_transform, eval_transform = get_cifar10_transforms(augmentation=augmentation)
 
-    # Load raw dataset without transforms so we can apply different transforms to train vs val
+    # Load raw dataset without transforms to apply separate train/val transforms post-split
     raw_train_dataset = torchvision.datasets.CIFAR10(
-        root=str(data_dir),
+        root=str(target_data_dir),
         train=True,
         download=download,
         transform=None,
     )
 
-    # Untouched official test set
+    # Untouched official test set (10,000 images)
     raw_test_dataset = torchvision.datasets.CIFAR10(
-        root=str(data_dir),
+        root=str(target_data_dir),
         train=False,
         download=download,
         transform=eval_transform,
     )
 
-    # Deterministic split into train and validation sets
+    # Deterministic split into train (40,000) and validation (10,000) sets
     total_train = len(raw_train_dataset)
     val_size = int(total_train * val_split_ratio)
     train_size = total_train - val_size
