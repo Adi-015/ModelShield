@@ -40,6 +40,7 @@ BASE_DIR = STORAGE_ROOT
 DATA_DIR = REPO_ROOT / "data"  # Reuse shared raw dataset directory
 CHECKPOINT_DIR = STORAGE_ROOT / "checkpoints"
 RESULTS_DIR = STORAGE_ROOT / "results"
+OUTPUTS_DIR = STORAGE_ROOT / "outputs"
 LOGS_DIR = STORAGE_ROOT / "logs"
 
 # Sub-results directories
@@ -74,7 +75,7 @@ def setup_storage(
        or running in Colab with Drive mounted.
     3. Local Phase 2 directory if running outside Colab or use_drive is False.
     """
-    global STORAGE_ROOT, BASE_DIR, DATA_DIR, CHECKPOINT_DIR, RESULTS_DIR, LOGS_DIR
+    global STORAGE_ROOT, BASE_DIR, DATA_DIR, CHECKPOINT_DIR, RESULTS_DIR, OUTPUTS_DIR, LOGS_DIR
     global RESULTS_CLASSIFIER, RESULTS_DETECTOR, RESULTS_ATTACKS, RESULTS_FIREWALL
     global CLASSIFIER_CHECKPOINT_PATH, DETECTOR_CHECKPOINT_PATH
     global CLASSIFIER_CHECKPOINT_BEST, DETECTOR_CHECKPOINT_BEST, FIREWALL_THRESHOLD_FILE
@@ -108,6 +109,7 @@ def setup_storage(
     DATA_DIR = REPO_ROOT / "data"
     CHECKPOINT_DIR = STORAGE_ROOT / "checkpoints"
     RESULTS_DIR = STORAGE_ROOT / "results"
+    OUTPUTS_DIR = STORAGE_ROOT / "outputs"
     LOGS_DIR = STORAGE_ROOT / "logs"
 
     RESULTS_CLASSIFIER = RESULTS_DIR / "classifier"
@@ -130,6 +132,7 @@ def setup_storage(
         DATA_DIR,
         CHECKPOINT_DIR,
         RESULTS_DIR,
+        OUTPUTS_DIR,
         LOGS_DIR,
         RESULTS_CLASSIFIER,
         RESULTS_DETECTOR,
